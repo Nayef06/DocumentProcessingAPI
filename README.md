@@ -31,7 +31,12 @@ Backend API for authenticated document uploads, asynchronous document processing
 
 ## Running the Project
 
-Start all services:
+Install the dependencies and start the API:
 
 ```bash
-docker compose up --build
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+
+
+".\.venv\Scripts\python.exe -m uvicorn app.main:app --reload"
