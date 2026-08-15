@@ -12,6 +12,11 @@ from app.db.session import get_db
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.document import DocumentPublic, DocumentStatus
+from app.services.document_processing import (
+    DocumentNotFoundError,
+    DocumentProcessingError,
+    process_document,
+)
 from app.services.storage import FileTooLargeError, LocalFileStorage
 
 
@@ -144,4 +149,26 @@ def get_document_status(
     db: Annotated[Session, Depends(get_db)],
 ) -> DocumentStatus:
     document = _owned_document(db, document_id, current_user.id)
+    return DocumentStatus(document_id=document.id, status=document.status)
+
+
+@router.post("/{document_id}/process", response_model=DocumentStatus)
+def process_owned_document(
+    document_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> DocumentStatus:
+    _owned_document(db, document_id, current_user.id)
+    try:
+        document = process_document(document_id, db)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        ) from exc
+    except DocumentProcessingError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Document processing failed: {exc}",
+        ) from exc
     return DocumentStatus(document_id=document.id, status=document.status)
