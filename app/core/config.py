@@ -13,6 +13,7 @@ class Settings(BaseSettings):
         "postgresql+psycopg2://postgres:postgres@localhost:5432/"
         "async_document_processing"
     )
+    REDIS_URL: str = "redis://localhost:6379/0"
     SECRET_KEY: str
     ALGORITHM: Literal["HS256"] = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30

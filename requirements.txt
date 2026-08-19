@@ -9,3 +9,5 @@ PyJWT
 email-validator
 python-multipart
 pypdf
+celery
+redis
