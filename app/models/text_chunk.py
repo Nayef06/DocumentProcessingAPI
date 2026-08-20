@@ -1,7 +1,15 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint, func
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -15,6 +23,11 @@ class TextChunk(Base):
     __table_args__ = (
         UniqueConstraint(
             "document_id", "chunk_index", name="uq_text_chunks_document_chunk_index"
+        ),
+        Index(
+            "ix_text_chunks_content_fts",
+            text("to_tsvector('english', content)"),
+            postgresql_using="gin",
         ),
     )
 
