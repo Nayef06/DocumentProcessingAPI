@@ -2,7 +2,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -149,6 +157,47 @@ def get_document_status(
 ) -> DocumentStatus:
     document = _owned_document(db, document_id, current_user.id)
     return DocumentStatus(document_id=document.id, status=document.status)
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_document(
+    document_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    document = _owned_document(db, document_id, current_user.id)
+    active_job = db.scalar(
+        select(ProcessingJob.id).where(
+            ProcessingJob.document_id == document.id,
+            ProcessingJob.status.in_(("QUEUED", "STARTED")),
+        )
+    )
+    if active_job is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Document cannot be deleted while processing is active",
+        )
+
+    storage_path = document.storage_path
+    db.delete(document)
+    try:
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not delete document",
+        ) from exc
+
+    try:
+        LocalFileStorage.remove(storage_path)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Document was deleted, but its stored file could not be removed",
+        ) from exc
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

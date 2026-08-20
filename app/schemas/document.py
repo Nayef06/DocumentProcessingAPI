@@ -1,7 +1,10 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
+
+
+DocumentProcessingStatus = Literal["PENDING", "PROCESSING", "PROCESSED", "FAILED"]
 
 
 class DocumentPublic(BaseModel):
@@ -9,7 +12,7 @@ class DocumentPublic(BaseModel):
     original_filename: str
     content_type: str
     file_size: int
-    status: str
+    status: DocumentProcessingStatus
     metadata_json: dict[str, Any]
     created_at: datetime
 
@@ -18,4 +21,4 @@ class DocumentPublic(BaseModel):
 
 class DocumentStatus(BaseModel):
     document_id: int
-    status: str
+    status: DocumentProcessingStatus
