@@ -54,3 +54,20 @@ dependencies, and start the API:
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
+
+## Integration tests
+
+The integration suite uses `TEST_DATABASE_URL`, which must point to a PostgreSQL
+database separate from `DATABASE_URL`. The test runner creates the database when
+it does not exist, rebuilds its schema from the SQLAlchemy models, and truncates
+all application tables between tests. Celery runs tasks eagerly, and uploaded
+files are written to per-test temporary directories.
+
+With the Compose stack running, execute:
+
+```bash
+docker compose exec api pytest
+```
+
+For local execution, ensure PostgreSQL is available at the URLs in `.env`, then
+run `pytest`.
