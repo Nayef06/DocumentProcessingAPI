@@ -12,6 +12,10 @@ class FileTooLargeError(Exception):
     """Raised when an upload exceeds the configured size limit."""
 
 
+class EmptyFileError(Exception):
+    """Raised when an upload contains no bytes."""
+
+
 @dataclass(frozen=True)
 class StoredFile:
     stored_filename: str
@@ -43,6 +47,10 @@ class LocalFileStorage:
             if destination_created:
                 destination.unlink(missing_ok=True)
             raise
+
+        if file_size == 0:
+            destination.unlink(missing_ok=True)
+            raise EmptyFileError
 
         return StoredFile(
             stored_filename=stored_filename,

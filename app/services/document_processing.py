@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.document import Document
 from app.models.text_chunk import TextChunk
 from app.services.chunking import chunk_text
-from app.services.extraction import extract_text
+from app.services.extraction import TextExtractionError, extract_text
 
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ class DocumentNotFoundError(Exception):
 
 
 class DocumentProcessingError(Exception):
-    """Raised after processing fails and the document is marked FAILED."""
+    """Raised with a client-safe message after document processing fails."""
 
 
 def process_document(document_id: int, db: Session) -> Document:
@@ -28,6 +28,7 @@ def process_document(document_id: int, db: Session) -> Document:
         raise DocumentNotFoundError(f"Document {document_id} was not found")
 
     try:
+        logger.info("Document processing started document_id=%s", document_id)
         document.status = "PROCESSING"
         db.commit()
         db.refresh(document)
@@ -54,6 +55,11 @@ def process_document(document_id: int, db: Session) -> Document:
         document.status = "PROCESSED"
         db.commit()
         db.refresh(document)
+        logger.info(
+            "Document processing completed document_id=%s chunks=%s",
+            document_id,
+            len(chunks),
+        )
         return document
     except Exception as exc:
         db.rollback()
@@ -69,4 +75,10 @@ def process_document(document_id: int, db: Session) -> Document:
             db.rollback()
             logger.exception("Could not mark document %s as FAILED", document_id)
 
-        raise DocumentProcessingError(str(exc)) from exc
+        if isinstance(exc, TextExtractionError):
+            public_message = "Document text extraction failed"
+        elif isinstance(exc, FileNotFoundError):
+            public_message = "Stored document file is unavailable"
+        else:
+            public_message = "Document processing failed"
+        raise DocumentProcessingError(public_message) from exc

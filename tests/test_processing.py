@@ -96,9 +96,10 @@ def test_failed_processing_marks_document_and_job_failed(
         )
     )
 
-    assert response.status_code == 503
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Document text extraction failed"}
     assert document is not None and document.status == "FAILED"
     assert job is not None and job.status == "FAILED"
     assert job.started_at is not None
     assert job.finished_at is not None
-    assert job.error_message
+    assert job.error_message == "Document text extraction failed"

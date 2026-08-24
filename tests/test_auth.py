@@ -1,10 +1,13 @@
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
+import jwt
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.user import User
+from app.core.config import settings
 
 
 def test_register_succeeds(client: TestClient, db_session: Session) -> None:
@@ -31,6 +34,23 @@ def test_duplicate_registration_fails(
     )
 
     assert response.status_code == 409
+    assert response.json() == {"detail": "Email is already registered"}
+
+
+def test_registration_validates_email_and_password_without_echoing_password(
+    client: TestClient,
+) -> None:
+    password = "pw#7"
+
+    response = client.post(
+        "/auth/register",
+        json={"email": "not-an-email", "password": password},
+    )
+
+    assert response.status_code == 422
+    assert isinstance(response.json()["detail"], list)
+    assert all("input" not in issue for issue in response.json()["detail"])
+    assert password not in response.text
 
 
 def test_login_succeeds(client: TestClient, user: dict) -> None:
@@ -57,6 +77,33 @@ def test_auth_me_requires_authentication(client: TestClient) -> None:
     response = client.get("/auth/me")
 
     assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_auth_me_rejects_invalid_jwt(client: TestClient) -> None:
+    response = client.get(
+        "/auth/me",
+        headers={"Authorization": "Bearer not-a-valid-jwt"},
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Could not validate credentials"}
+
+
+def test_auth_me_rejects_expired_jwt(client: TestClient) -> None:
+    token = jwt.encode(
+        {"sub": "1", "exp": datetime.now(UTC) - timedelta(minutes=1)},
+        settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM,
+    )
+
+    response = client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Could not validate credentials"}
 
 
 def test_auth_me_succeeds_with_valid_jwt(
