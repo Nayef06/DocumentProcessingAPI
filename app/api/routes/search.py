@@ -29,6 +29,7 @@ def search_documents(
         str,
         Query(
             min_length=1,
+            max_length=500,
             description="Words or phrases to find in processed document chunks",
         ),
     ],

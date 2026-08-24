@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 
 import jwt
@@ -11,13 +12,20 @@ from app.db.session import get_db
 from app.models.user import User
 
 
-bearer_scheme = HTTPBearer(auto_error=False)
-
-credentials_exception = HTTPException(
-    status_code=status.HTTP_401_UNAUTHORIZED,
-    detail="Could not validate credentials",
-    headers={"WWW-Authenticate": "Bearer"},
+logger = logging.getLogger(__name__)
+bearer_scheme = HTTPBearer(
+    bearerFormat="JWT",
+    description="JWT access token returned by the login endpoint.",
+    auto_error=False,
 )
+
+
+def _credentials_exception() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def get_current_user(
@@ -27,7 +35,8 @@ def get_current_user(
     db: Annotated[Session, Depends(get_db)],
 ) -> User:
     if credentials is None:
-        raise credentials_exception
+        logger.info("Protected endpoint requested without Bearer credentials")
+        raise _credentials_exception()
 
     try:
         payload = jwt.decode(
@@ -38,12 +47,14 @@ def get_current_user(
         )
         subject = payload.get("sub")
         if not isinstance(subject, str):
-            raise credentials_exception
+            raise _credentials_exception()
         user_id = int(subject)
     except (InvalidTokenError, TypeError, ValueError) as exc:
-        raise credentials_exception from exc
+        logger.info("Protected endpoint requested with invalid Bearer credentials")
+        raise _credentials_exception() from exc
 
     user = db.get(User, user_id)
     if user is None:
-        raise credentials_exception
+        logger.info("Bearer token subject does not identify an active user")
+        raise _credentials_exception()
     return user

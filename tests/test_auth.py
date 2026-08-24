@@ -31,6 +31,22 @@ def test_duplicate_registration_fails(
     )
 
     assert response.status_code == 409
+    assert response.json() == {"detail": "Email is already registered"}
+
+
+def test_registration_validates_email_and_password_without_echoing_password(
+    client: TestClient,
+) -> None:
+    password = "short"
+
+    response = client.post(
+        "/auth/register",
+        json={"email": "not-an-email", "password": password},
+    )
+
+    assert response.status_code == 422
+    assert isinstance(response.json()["detail"], list)
+    assert password not in response.text
 
 
 def test_login_succeeds(client: TestClient, user: dict) -> None:
@@ -57,6 +73,17 @@ def test_auth_me_requires_authentication(client: TestClient) -> None:
     response = client.get("/auth/me")
 
     assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_auth_me_rejects_invalid_jwt(client: TestClient) -> None:
+    response = client.get(
+        "/auth/me",
+        headers={"Authorization": "Bearer not-a-valid-jwt"},
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Could not validate credentials"}
 
 
 def test_auth_me_succeeds_with_valid_jwt(

@@ -103,3 +103,21 @@ def test_unprocessed_documents_are_excluded(
 
     assert response.status_code == 200
     assert response.json()["results"] == []
+
+
+def test_search_rejects_blank_query_and_out_of_range_limit(
+    client: TestClient,
+    auth_headers: dict[str, str],
+) -> None:
+    blank = client.get("/search", params={"q": "   "}, headers=auth_headers)
+    zero_limit = client.get(
+        "/search", params={"q": "term", "limit": 0}, headers=auth_headers
+    )
+    excessive_limit = client.get(
+        "/search", params={"q": "term", "limit": 101}, headers=auth_headers
+    )
+
+    assert blank.status_code == 422
+    assert blank.json() == {"detail": "Search query must not be blank"}
+    assert zero_limit.status_code == 422
+    assert excessive_limit.status_code == 422
