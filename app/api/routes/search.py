@@ -7,13 +7,23 @@ from app.api.dependencies import get_current_user
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.search import SearchResponse
+from app.schemas.error import ErrorResponse
 from app.services.search import search_processed_chunks
 
 
-router = APIRouter(tags=["search"])
+router = APIRouter(tags=["Search"])
 
 
-@router.get("/search", response_model=SearchResponse)
+@router.get(
+    "/search",
+    response_model=SearchResponse,
+    summary="Search processed documents",
+    description=(
+        "Return ranked text-chunk matches from processed documents owned by the "
+        "authenticated user."
+    ),
+    responses={status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse}},
+)
 def search_documents(
     q: Annotated[
         str,

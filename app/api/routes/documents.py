@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
@@ -7,6 +8,7 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
+    Path as PathParameter,
     Response,
     UploadFile,
     status,
@@ -22,12 +24,15 @@ from app.models.document import Document
 from app.models.processing_job import ProcessingJob
 from app.models.user import User
 from app.schemas.document import DocumentPublic, DocumentStatus
+from app.schemas.error import ErrorResponse
 from app.schemas.job import ProcessingJobQueued
-from app.services.storage import FileTooLargeError, LocalFileStorage
+from app.services.document_processing import DocumentProcessingError
+from app.services.storage import EmptyFileError, FileTooLargeError, LocalFileStorage
 from app.worker.tasks import process_document_task
 
 
-router = APIRouter(prefix="/documents", tags=["documents"])
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/documents", tags=["Documents"])
 
 ALLOWED_CONTENT_TYPES = {
     ".txt": {"text/plain", "application/octet-stream"},
@@ -55,7 +60,7 @@ def _validate_upload(upload: UploadFile) -> tuple[str, str]:
             detail="Only .txt and .pdf files are supported",
         )
 
-    content_type = (upload.content_type or "").lower()
+    content_type = (upload.content_type or "").lower().split(";", maxsplit=1)[0].strip()
     if content_type not in ALLOWED_CONTENT_TYPES[extension]:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
@@ -83,6 +88,22 @@ def _owned_document(db: Session, document_id: int, user_id: int) -> Document:
     "/upload",
     response_model=DocumentPublic,
     status_code=status.HTTP_201_CREATED,
+    summary="Upload a document",
+    description=(
+        "Upload a non-empty text or PDF document. The configured upload-size limit "
+        f"is {settings.MAX_UPLOAD_SIZE_MB} MB."
+    ),
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
+        status.HTTP_413_CONTENT_TOO_LARGE: {
+            "model": ErrorResponse,
+            "description": "The file exceeds the configured upload-size limit.",
+        },
+        status.HTTP_415_UNSUPPORTED_MEDIA_TYPE: {
+            "model": ErrorResponse,
+            "description": "The filename or content type is unsupported.",
+        },
+    },
 )
 def upload_document(
     file: Annotated[UploadFile, File(description="A .txt or .pdf document")],
@@ -96,17 +117,32 @@ def upload_document(
     )
     try:
         stored_file = storage.save(file, extension)
+    except EmptyFileError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Uploaded file must not be empty",
+        ) from exc
     except FileTooLargeError as exc:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"File exceeds the {settings.MAX_UPLOAD_SIZE_MB} MB upload limit",
         ) from exc
+    except OSError as exc:
+        logger.exception("Could not store uploaded document user_id=%s", current_user.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not store uploaded document",
+        ) from exc
+
+    normalized_content_type = (
+        (file.content_type or "").lower().split(";", maxsplit=1)[0].strip()
+    )
 
     document = Document(
         user_id=current_user.id,
         original_filename=original_filename,
         stored_filename=stored_file.stored_filename,
-        content_type=file.content_type.lower(),
+        content_type=normalized_content_type,
         file_size=stored_file.file_size,
         storage_path=stored_file.storage_path,
         status="PENDING",
@@ -118,15 +154,28 @@ def upload_document(
     except SQLAlchemyError as exc:
         db.rollback()
         storage.remove(stored_file.storage_path)
+        logger.exception("Could not persist uploaded document user_id=%s", current_user.id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not save document metadata",
         ) from exc
     db.refresh(document)
+    logger.info(
+        "Document uploaded document_id=%s user_id=%s size_bytes=%s type=%s",
+        document.id,
+        current_user.id,
+        document.file_size,
+        document.content_type,
+    )
     return document
 
 
-@router.get("", response_model=list[DocumentPublic])
+@router.get(
+    "",
+    response_model=list[DocumentPublic],
+    summary="List documents",
+    responses={status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse}},
+)
 def list_documents(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
@@ -140,18 +189,34 @@ def list_documents(
     )
 
 
-@router.get("/{document_id}", response_model=DocumentPublic)
+@router.get(
+    "/{document_id}",
+    response_model=DocumentPublic,
+    summary="Get a document",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
 def get_document(
-    document_id: int,
+    document_id: Annotated[int, PathParameter(gt=0, description="Document ID")],
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> Document:
     return _owned_document(db, document_id, current_user.id)
 
 
-@router.get("/{document_id}/status", response_model=DocumentStatus)
+@router.get(
+    "/{document_id}/status",
+    response_model=DocumentStatus,
+    summary="Get document processing status",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+    },
+)
 def get_document_status(
-    document_id: int,
+    document_id: Annotated[int, PathParameter(gt=0, description="Document ID")],
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> DocumentStatus:
@@ -159,9 +224,22 @@ def get_document_status(
     return DocumentStatus(document_id=document.id, status=document.status)
 
 
-@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a document",
+    description="Delete a document unless it has a queued or running processing job.",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "The document is actively processing.",
+        },
+    },
+)
 def delete_document(
-    document_id: int,
+    document_id: Annotated[int, PathParameter(gt=0, description="Document ID")],
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> Response:
@@ -184,6 +262,7 @@ def delete_document(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
+        logger.exception("Could not delete document_id=%s", document.id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not delete document",
@@ -191,12 +270,13 @@ def delete_document(
 
     try:
         LocalFileStorage.remove(storage_path)
-    except OSError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Document was deleted, but its stored file could not be removed",
-        ) from exc
+    except OSError:
+        logger.exception(
+            "Document metadata deleted but stored file cleanup failed document_id=%s",
+            document_id,
+        )
 
+    logger.info("Document deleted document_id=%s user_id=%s", document_id, current_user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -204,13 +284,30 @@ def delete_document(
     "/{document_id}/process",
     response_model=ProcessingJobQueued,
     status_code=status.HTTP_202_ACCEPTED,
+    summary="Queue document processing",
+    description=(
+        "Queue text extraction and indexing. A document may have only one active "
+        "processing job."
+    ),
+    responses={
+        status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
+        status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "The document is already processing or is in an invalid state.",
+        },
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "model": ErrorResponse,
+            "description": "The processing task could not be queued.",
+        },
+    },
 )
 def process_owned_document(
-    document_id: int,
+    document_id: Annotated[int, PathParameter(gt=0, description="Document ID")],
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
 ) -> ProcessingJobQueued:
-    _owned_document(db, document_id, current_user.id)
+    document = _owned_document(db, document_id, current_user.id)
 
     active_job = db.scalar(
         select(ProcessingJob)
@@ -221,10 +318,15 @@ def process_owned_document(
         .order_by(ProcessingJob.created_at.desc(), ProcessingJob.id.desc())
     )
     if active_job is not None:
-        return ProcessingJobQueued(
-            document_id=document_id,
-            job_id=active_job.id,
-            status=active_job.status,
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Document already has an active processing job",
+        )
+
+    if document.status not in {"PENDING", "PROCESSED", "FAILED"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Document cannot be processed while in {document.status} status",
         )
 
     job = ProcessingJob(document_id=document_id, status="QUEUED")
@@ -234,6 +336,7 @@ def process_owned_document(
         db.refresh(job)
     except SQLAlchemyError as exc:
         db.rollback()
+        logger.exception("Could not create processing job document_id=%s", document_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not create processing job",
@@ -241,14 +344,36 @@ def process_owned_document(
 
     try:
         task = process_document_task.delay(document_id, job.id)
+    except DocumentProcessingError as exc:
+        db.expire_all()
+        logger.warning(
+            "Document processing failed before queue response document_id=%s job_id=%s",
+            document_id,
+            job.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     except Exception as exc:
+        logger.exception(
+            "Could not enqueue processing document_id=%s job_id=%s",
+            document_id,
+            job.id,
+        )
         job.status = "FAILED"
-        job.error_message = f"Could not enqueue processing task: {exc}"
+        job.error_message = "Could not enqueue document processing"
         job.finished_at = datetime.now(timezone.utc)
+        document.status = "FAILED"
         try:
             db.commit()
         except SQLAlchemyError:
             db.rollback()
+            logger.exception(
+                "Could not persist enqueue failure document_id=%s job_id=%s",
+                document_id,
+                job.id,
+            )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not enqueue document processing",
@@ -259,10 +384,21 @@ def process_owned_document(
         db.commit()
     except SQLAlchemyError as exc:
         db.rollback()
+        logger.exception(
+            "Processing task id persistence failed document_id=%s job_id=%s",
+            document_id,
+            job.id,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Processing task was enqueued but its task id could not be saved",
         ) from exc
+    logger.info(
+        "Processing job queued document_id=%s job_id=%s task_id=%s",
+        document_id,
+        job.id,
+        task.id,
+    )
     return ProcessingJobQueued(
         document_id=document_id,
         job_id=job.id,

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from app.db.session import SessionLocal
 from app.models.document import Document
 from app.models.processing_job import ProcessingJob
-from app.services.document_processing import process_document
+from app.services.document_processing import DocumentProcessingError, process_document
 from app.worker.celery_app import celery_app
 
 
@@ -13,6 +13,12 @@ logger = logging.getLogger(__name__)
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _public_failure_message(exc: Exception) -> str:
+    if isinstance(exc, DocumentProcessingError):
+        return str(exc)
+    return "Document processing failed"
 
 
 @celery_app.task(name="app.worker.tasks.process_document_task")
@@ -32,6 +38,11 @@ def process_document_task(document_id: int, job_id: int) -> None:
         job.started_at = _utc_now()
         job.error_message = None
         db.commit()
+        logger.info(
+            "Processing job started document_id=%s job_id=%s",
+            document_id,
+            job_id,
+        )
 
         process_document(document_id, db)
 
@@ -41,6 +52,11 @@ def process_document_task(document_id: int, job_id: int) -> None:
         job.status = "SUCCESS"
         job.finished_at = _utc_now()
         db.commit()
+        logger.info(
+            "Processing job completed document_id=%s job_id=%s",
+            document_id,
+            job_id,
+        )
     except Exception as exc:
         db.rollback()
         logger.exception(
@@ -51,7 +67,7 @@ def process_document_task(document_id: int, job_id: int) -> None:
             failed_job = db.get(ProcessingJob, job_id)
             if failed_job is not None:
                 failed_job.status = "FAILED"
-                failed_job.error_message = str(exc) or exc.__class__.__name__
+                failed_job.error_message = _public_failure_message(exc)
                 failed_job.finished_at = _utc_now()
 
             document = db.get(Document, document_id)

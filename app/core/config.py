@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     APP_NAME: str = "Async Document Processing API"
-    DEBUG: bool = True
+    DEBUG: bool = False
     API_PREFIX: str = "/api"
     DATABASE_URL: str = (
         "postgresql+psycopg2://postgres:postgres@localhost:5432/"
@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     SECRET_KEY: str
     ALGORITHM: Literal["HS256"] = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, gt=0)
     UPLOAD_DIR: Path = Path("uploads")
     MAX_UPLOAD_SIZE_MB: int = Field(default=10, gt=0)
 
