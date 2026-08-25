@@ -20,7 +20,7 @@ router = APIRouter(prefix="/jobs", tags=["Processing Jobs"])
     "/{job_id}",
     response_model=ProcessingJobPublic,
     summary="Get a processing job",
-    description="Return the lifecycle status of one owned document's processing job.",
+    description="Check the status of a processing job for one of your documents.",
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
         status.HTTP_404_NOT_FOUND: {"model": ErrorResponse},

@@ -18,10 +18,7 @@ router = APIRouter(tags=["Search"])
     "/search",
     response_model=SearchResponse,
     summary="Search processed documents",
-    description=(
-        "Return ranked text-chunk matches from processed documents owned by the "
-        "authenticated user."
-    ),
+    description="Search text chunks from your processed documents.",
     responses={
         status.HTTP_401_UNAUTHORIZED: {"model": ErrorResponse},
         status.HTTP_422_UNPROCESSABLE_CONTENT: {

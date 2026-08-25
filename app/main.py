@@ -16,22 +16,22 @@ from app.schemas.error import sanitized_validation_errors
 logger = logging.getLogger(__name__)
 
 OPENAPI_TAGS = [
-    {"name": "Health", "description": "Service availability checks."},
+    {"name": "Health", "description": "Check whether the API is running."},
     {
         "name": "Authentication",
-        "description": "User registration, login, and current-user details.",
+        "description": "Register, log in, and view the current user.",
     },
     {
         "name": "Documents",
-        "description": "Authenticated document upload and lifecycle operations.",
+        "description": "Upload, view, process, and delete your documents.",
     },
     {
         "name": "Processing Jobs",
-        "description": "Asynchronous document-processing job status.",
+        "description": "Check background processing jobs.",
     },
     {
         "name": "Search",
-        "description": "Search across the authenticated user's processed documents.",
+        "description": "Search text from your processed documents.",
     },
 ]
 

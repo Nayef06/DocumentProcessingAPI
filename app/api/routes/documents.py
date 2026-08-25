@@ -294,7 +294,7 @@ def delete_document(
     status_code=status.HTTP_202_ACCEPTED,
     summary="Queue document processing",
     description=(
-        "Queue text extraction and indexing. A document may have only one active "
+        "Queue text extraction and chunking. A document may have only one active "
         "processing job."
     ),
     responses={
