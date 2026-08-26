@@ -45,8 +45,10 @@ DEVELOPMENT_DATABASE_URL, TEST_DATABASE_URL = _test_database_url()
 # Application modules read settings at import time, so point every application
 # session (including Celery task sessions) at PostgreSQL's isolated test database.
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL.render_as_string(hide_password=False)
-os.environ.setdefault("SECRET_KEY", "integration-test-secret-key")
-os.environ["DEBUG"] = "false"
+os.environ.setdefault(
+    "SECRET_KEY",
+    "integration-test-secret-key-at-least-32-characters",
+)
 
 from app.core.config import settings  # noqa: E402
 from app.db.base import Base  # noqa: E402

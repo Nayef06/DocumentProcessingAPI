@@ -1,17 +1,21 @@
+x-app-image: &app-image
+  image: async-document-processing-api:local
+  build:
+    context: .
+    dockerfile: Dockerfile
+
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *app-image
     command:
       - sh
       - -c
       - alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000
     environment: &app-environment
-      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-async_document_processing}
-      TEST_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-async_document_processing}_test
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:?POSTGRES_USER must be set}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-async_document_processing}
+      TEST_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:?POSTGRES_USER must be set}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-async_document_processing}_test
       REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: ${SECRET_KEY:-local-compose-secret-key-change-me}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
       UPLOAD_DIR: /app/uploads
     ports:
       - "8000:8000"
@@ -24,9 +28,7 @@ services:
         condition: service_healthy
 
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *app-image
     command:
       - celery
       - -A
@@ -46,8 +48,8 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-async_document_processing}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

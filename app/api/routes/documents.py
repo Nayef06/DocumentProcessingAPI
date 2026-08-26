@@ -14,7 +14,7 @@ from fastapi import (
     status,
 )
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
@@ -346,6 +346,16 @@ def process_owned_document(
     try:
         db.commit()
         db.refresh(job)
+    except IntegrityError as exc:
+        db.rollback()
+        logger.info(
+            "Concurrent processing request rejected document_id=%s",
+            document_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Document already has an active processing job",
+        ) from exc
     except SQLAlchemyError as exc:
         db.rollback()
         logger.exception("Could not create processing job document_id=%s", document_id)

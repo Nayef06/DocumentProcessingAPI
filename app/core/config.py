@@ -7,20 +7,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     APP_NAME: str = "Async Document Processing API"
-    DEBUG: bool = False
-    API_PREFIX: str = "/api"
-    DATABASE_URL: str = (
-        "postgresql+psycopg2://postgres:postgres@localhost:5432/"
-        "async_document_processing"
-    )
+    DATABASE_URL: str
     REDIS_URL: str = "redis://localhost:6379/0"
-    SECRET_KEY: str
+    SECRET_KEY: str = Field(min_length=32)
     ALGORITHM: Literal["HS256"] = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, gt=0)
     UPLOAD_DIR: Path = Path("uploads")
     MAX_UPLOAD_SIZE_MB: int = Field(default=10, gt=0)
 
-    model_config = SettingsConfigDict(env_file=".env")
+    # The shared .env file also contains Docker Compose and test settings that
+    # are intentionally not application settings.
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 settings = Settings()

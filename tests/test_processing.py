@@ -1,13 +1,33 @@
 from collections.abc import Callable
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.document import Document
 from app.models.processing_job import ProcessingJob
 from app.models.text_chunk import TextChunk
 from app.worker.celery_app import celery_app
+
+
+def test_database_prevents_two_active_jobs_for_one_document(
+    auth_headers: dict[str, str],
+    upload_text: Callable[..., dict],
+    db_session: Session,
+) -> None:
+    uploaded = upload_text("concurrent processing", headers=auth_headers)
+    db_session.add_all(
+        [
+            ProcessingJob(document_id=uploaded["id"], status="QUEUED"),
+            ProcessingJob(document_id=uploaded["id"], status="STARTED"),
+        ]
+    )
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
 
 
 def test_processing_text_document_runs_eagerly_and_persists_results(

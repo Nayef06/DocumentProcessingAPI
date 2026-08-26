@@ -114,7 +114,11 @@ Docker and Docker Compose are the easiest way to run the project. Copy the examp
 cp .env.example .env
 ```
 
-On PowerShell, use `Copy-Item .env.example .env` instead. Change `SECRET_KEY` in `.env` before using the app anywhere other than local development.
+On PowerShell, use `Copy-Item .env.example .env` instead. Replace `SECRET_KEY` with a random value of at least 32 characters before starting the app. One way to generate one is:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
 
 Build and start the API, worker, PostgreSQL, and Redis:
 
